@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>POMO</title>
+<link href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#ffd6e6;--win:#fff2f7;--bar:#7a1745;--barink:#ffe3ef;--ink:#4a1230;--line:#7a1745;--hot:#ff4f93;--soft:#ffc2da;color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{margin:0;overflow:hidden;background:var(--win);color:var(--ink);font-family:"Silkscreen","Courier New",monospace;user-select:none;-webkit-user-select:none}
+.win{width:100vw;height:100vh;display:flex;flex-direction:column;background:var(--win);box-shadow:inset 0 0 0 3px var(--line)}
+.win.ring{box-shadow:inset 0 0 0 3px var(--hot)}
+.win.ring.flash{box-shadow:inset 0 0 0 3px var(--line),inset 0 0 0 6px var(--hot)}
+.bar{background:var(--bar);color:var(--barink);display:flex;align-items:center;padding:6px 8px;font-size:12px;font-weight:700;letter-spacing:1px}
+.bar b{flex:1}
+.bar button,.bar span{background:none;border:0;color:inherit;font:inherit;width:22px;height:18px;display:flex;align-items:center;justify-content:center;cursor:default}
+.bar button{cursor:pointer}
+.bar button[aria-pressed="true"]{background:var(--hot);color:#fff}
+.body{padding:12px 14px;flex:1;display:flex;flex-direction:column;justify-content:center}
+.clock{display:block;width:100%;background:none;border:0;padding:0;cursor:pointer}
+canvas{width:220px;height:220px;image-rendering:pixelated;display:block;margin:0 auto}
+.time{font-size:44px;font-weight:700;text-align:center;letter-spacing:2px;margin:6px 0 8px}
+.foot{display:flex;justify-content:space-between;align-items:center;font-size:12px}
+.sq{display:flex;gap:4px}
+.sq i{width:10px;height:10px;box-shadow:0 0 0 2px var(--line);background:var(--soft)}
+.sq i.on{background:var(--hot)}
+.hint{font-size:9px;text-align:center;margin-top:10px;opacity:.7}
+button:focus-visible{outline:3px dashed var(--bar);outline-offset:3px}
+</style>
+</head>
+<body>
+<main class="win" id="win">
+  <div class="bar" data-tauri-drag-region>
+    <b data-tauri-drag-region>POMO &#9829;</b>
+    <button id="tes" aria-pressed="false" aria-label="Mode tes" style="width:auto;padding:0 6px;font-size:10px">TES</button>
+    <button id="pin" aria-pressed="false" aria-label="Selalu di atas"><svg width="12" height="12" viewBox="0 0 8 8" fill="currentColor"><rect x="2" y="0" width="4" height="1"/><rect x="3" y="1" width="2" height="3"/><rect x="1" y="4" width="6" height="1"/><rect x="3" y="5" width="2" height="3"/></svg></button>
+    <button id="min" aria-label="Minimize">&#8211;</button><button id="close" aria-label="Tutup">&#215;</button>
+  </div>
+  <div class="body">
+    <button class="clock" id="clock" aria-label="Mulai atau jeda"><canvas id="c" width="32" height="32"></canvas></button>
+    <div class="time" id="time">25:00</div>
+    <div class="foot"><span id="label">Siap</span><div class="sq" id="sq"><i></i><i></i><i></i><i></i></div></div>
+    <div class="hint" id="hint">Klik jamnya untuk mulai</div>
+  </div>
+</main>
+<script>
+const M={focus:1500,short:300,long:900};
+let mode="focus",remain=M.focus,running=false,endAt=0,ringing=false,ringUntil=0,lastBeep=0,done=0,f=0,ac=null;
+const $=i=>document.getElementById(i),g=$("c").getContext("2d");
+const T=window.__TAURI__,W=T&&T.window?T.window.getCurrentWindow():null,N=T&&T.notification;
+async function askNotif(){try{if(N){if(!(await N.isPermissionGranted()))await N.requestPermission()}else if("Notification"in window&&Notification.permission==="default")Notification.requestPermission()}catch(e){}}
+async function notify(b){try{if(N){if(await N.isPermissionGranted())N.sendNotification({title:"POMO",body:b})}else if("Notification"in window&&Notification.permission==="granted")new Notification("POMO",{body:b})}catch(e){}}
+const P={
+  focus:{body:"#ff4f93",dark:"#7a1745",face:"#fff8fb",bell:"#ffa6cb",ink:"#4a1230",dot:"#ff7fb0",fade:"#ffdfec",cheek:"#ffb3d1"},
+  rest:{body:"#ffa8cb",dark:"#8a2e5c",face:"#fffafc",bell:"#ffd0e4",ink:"#5a1a3c",dot:"#ff9cc2",fade:"#ffe6f0",cheek:"#ffc9de"}
+};
+function fmt(s){s=Math.max(0,Math.ceil(s));return String(Math.floor(s/60)).padStart(2,"0")+":"+String(s%60).padStart(2,"0")}
+function beep(){try{ac=ac||new (window.AudioContext||window.webkitAudioContext)();if(ac.state==="suspended")ac.resume();
+  [1047,1397,1047,1397].forEach((fr,i)=>{const o=ac.createOscillator(),v=ac.createGain(),t=ac.currentTime+i*.12;o.type="square";o.frequency.value=fr;
+  v.gain.setValueAtTime(.0001,t);v.gain.exponentialRampToValueAtTime(.12,t+.01);v.gain.exponentialRampToValueAtTime(.0001,t+.1);o.connect(v);v.connect(ac.destination);o.start(t);o.stop(t+.11)})}catch(e){}}
+function st(){
+  if(ringing)return"ring";
+  if(mode!=="focus")return"rest";
+  if(!running&&remain===M.focus)return"idle";
+  if(running&&remain<=10)return"near";
+  return"focus";
+}
+const px=(x,y,w,h,c)=>{g.fillStyle=c;g.fillRect(Math.round(x),Math.round(y),w,h)};
+function disc(cx,cy,r,c){g.fillStyle=c;for(let y=-r;y<=r;y++)for(let x=-r;x<=r;x++)if(x*x+y*y<=r*r+r*.5)g.fillRect(cx+x,cy+y,1,1)}
+function heart(x,y,c){px(x,y,1,1,c);px(x+2,y,1,1,c);px(x,y+1,3,1,c);px(x+1,y+2,1,1,c)}
+function spark(x,y,c){px(x,y-1,1,3,c);px(x-1,y,3,1,c)}
+function draw(){
+  g.clearRect(0,0,32,32);
+  const s=st(),p=P[s==="rest"?"rest":"focus"];
+  const sx=s==="ring"?(f%2?1:-1):(s==="near"&&f%2?1:0);
+  const hop=(s==="focus"||s==="near")&&((f>>2)%2)?1:0;
+  const by=5-hop-(s==="ring"&&f%2?1:0);
+  const body=s==="ring"&&f%2?"#ff2f7d":p.body;
+  // handle + bells
+  px(14+sx,2,4,1,p.dark);px(15+sx,1,2,1,p.dark);
+  [8,24].forEach(x=>{disc(x+sx,by,3,p.dark);disc(x+sx,by,2,p.bell)});
+  // legs
+  px(9+sx,27,2,3,p.dark);px(8+sx,29,4,1,p.dark);px(21+sx,27,2,3,p.dark);px(20+sx,29,4,1,p.dark);
+  // body
+  disc(16+sx,17,12,p.dark);disc(16+sx,17,11,body);disc(16+sx,17,8,p.face);
+  // speckle dots = progress
+  const total=M[mode],el=s==="ring"?12:Math.floor((1-remain/total)*12);
+  for(let i=0;i<12;i++){const a=i/12*Math.PI*2;px(16+sx+Math.round(Math.sin(a)*6.5),17-Math.round(Math.cos(a)*6.5),1,1,i<el?p.fade:p.dot)}
+  // cheeks
+  if(s!=="near"&&s!=="ring"){px(10+sx,17,2,1,p.cheek);px(20+sx,17,2,1,p.cheek)}
+  // ornamen: pita, hati melayang, kilau
+  px(12+sx,4,3,3,p.dark);px(13+sx,5,1,1,p.face);px(18+sx,4,3,3,p.dark);px(19+sx,5,1,1,p.face);px(15+sx,4,2,3,p.dot);
+  if(s==="idle"||s==="focus"||s==="rest"){
+    const hc=s==="rest"?p.dark:"#ff7fb0";
+    heart(28,27-Math.floor((f%24)/3),hc);heart(1,27-Math.floor(((f+12)%24)/3),hc);
+    if((f>>2)%3)spark(2,12,"#ff4f93");
+    if((f>>2)%3!==1)spark(29,11,"#ff4f93");
+  }
+  // face
+  const L=13+sx,R=19+sx,k=p.ink;
+  if(s==="idle"){
+    if(f%40<2){px(L,14,2,1,k);px(R,14,2,1,k)}else{px(L,13,2,2,k);px(R,13,2,2,k)}
+    px(14+sx,18,1,1,k);px(15+sx,19,2,1,k);px(17+sx,18,1,1,k);
+  }else if(s==="focus"){
+    if(f%40<2){px(L,14,2,1,k);px(R,14,2,1,k)}else{px(L,13,2,2,k);px(R,13,2,2,k)}
+    px(15+sx,19,2,1,k);
+  }else if(s==="near"){
+    px(L,12,2,3,k);px(R,12,2,3,k);px(15+sx,19,2,2,k);
+    if((f>>1)%2)px(24+sx,10,1,2,"#ff9cc2");
+  }else if(s==="ring"){
+    px(L-1,12,1,1,k);px(L,13,1,1,k);px(L-1,14,1,1,k);px(R+2,12,1,1,k);px(R+1,13,1,1,k);px(R+2,14,1,1,k);
+    px(15+sx,18,2,3,k);
+    if(f%2){px(2,10,2,1,p.dark);px(1,14,3,1,p.dark);px(2,18,2,1,p.dark);px(28,10,2,1,p.dark);px(28,14,3,1,p.dark);px(28,18,2,1,p.dark)}
+  }else{
+    px(L,14,3,1,k);px(R-1,14,3,1,k);px(14+sx,18,1,1,k);px(15+sx,19,2,1,k);px(17+sx,18,1,1,k);
+    const o=(f>>3)%3;px(25,6-o,2,1,p.dark);px(27,4-o,2,1,p.dark);
+  }
+}
+function ui(){
+  const s=st();
+  $("time").textContent=fmt(remain);
+  $("label").textContent=({idle:"Siap",focus:running?"Fokus":"Jeda",near:"Hampir habis",ring:"Waktu habis",rest:running?"Istirahat":"Istirahat (siap)"})[s];
+  $("hint").textContent=ringing?"Klik jamnya untuk berhenti":running?"Klik jamnya untuk jeda":"Klik jamnya untuk mulai";
+  [...$("sq").children].forEach((d,i)=>d.classList.toggle("on",i<(done%4)+(mode==="focus"&&(running||remain<M.focus)?1:0)||(done>0&&done%4===0&&mode!=="focus"&&i<4)));
+  $("win").classList.toggle("ring",ringing);
+  document.title=(running||ringing)?fmt(remain)+" POMO":"POMO";
+}
+function setMode(m){mode=m;remain=M[m];running=false;ringing=false;ui()}
+function next(){if(mode==="focus"){done++;setMode(done%4===0?"long":"short")}else setMode("focus")}
+function finish(){running=false;ringing=true;remain=0;ringUntil=Date.now()+15000;lastBeep=Date.now();beep();
+  notify(mode==="focus"?"Waktunya istirahat!":"Yuk fokus lagi!");ui()}
+$("clock").onclick=()=>{
+  try{ac=ac||new (window.AudioContext||window.webkitAudioContext)()}catch(e){}
+  if(ringing){next();return}
+  if(!running){askNotif();running=true;endAt=Date.now()+remain*1000}
+  else running=false;
+  ui();
+};
+$("tes").onclick=e=>{const b=e.currentTarget,on=b.getAttribute("aria-pressed")!=="true";b.setAttribute("aria-pressed",on);M.focus=on?15:1500;M.short=on?8:300;M.long=on?10:900;done=0;setMode("focus")};
+$("pin").onclick=e=>{const b=e.currentTarget,on=b.getAttribute("aria-pressed")!=="true";b.setAttribute("aria-pressed",on);if(W)W.setAlwaysOnTop(on)};
+$("min").onclick=()=>{if(W)W.minimize()};
+$("close").onclick=()=>{if(W)W.close();else window.close()};
+setInterval(()=>{
+  const n=Date.now();
+  if(running){remain=(endAt-n)/1000;if(remain<=0)finish();else ui()}
+  if(ringing){if(n-lastBeep>1500&&n<ringUntil){beep();lastBeep=n}if(n>=ringUntil){next()}}
+},200);
+setInterval(()=>{f++;draw();$("win").classList.toggle("flash",ringing&&f%2===0)},125);
+ui();draw();
+</script>
+</body>
+</html>
